@@ -1,0 +1,21 @@
+name: Kobiton App Upload
+description: Upload an application (apk or ipa) to Kobiton App Repo
+author: https://github.com/kobiton
+requirements: []
+configuration:
+  properties:
+    app-name:
+      type: string
+    app-path:
+      type: string
+    app-type:
+      type: string
+    kobiton-app-id:
+      type: string
+    kobiton-app-access:
+      type: string
+    kobiton-username:
+      type: string
+    kobiton-api-key:
+      type: string
+  additionalProperties: false

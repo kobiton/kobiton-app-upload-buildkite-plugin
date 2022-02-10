@@ -1,0 +1,86 @@
+#!/bin/bash
+set -euo pipefail
+
+printf "\n=====================================================================================\n"
+printf "KOBITON APP UPLOAD PLUGIN"
+printf "\n=====================================================================================\n\n"
+
+printf "Installing ack...\n"
+curl https://beyondgrep.com/ack-v3.5.0 >/usr/local/bin/ack && chmod 0755 /usr/local/bin/ack
+
+hash ack 2>/dev/null || {
+    echo >&2 "ack required, but it's not installed."
+    exit 1
+}
+
+APP_NAME_INPUT="$BUILDKITE_PLUGIN_KOBITON_APP_UPLOAD_APP_NAME"
+APP_PATH_INPUT="$BUILDKITE_PLUGIN_KOBITON_APP_UPLOAD_APP_PATH"
+APP_SUFFIX_INPUT="$BUILDKITE_PLUGIN_KOBITON_APP_UPLOAD_APP_TYPE"
+APP_ID_INPUT="$BUILDKITE_PLUGIN_KOBITON_APP_UPLOAD_KOBITON_APP_ID"
+KOB_USERNAME_INPUT="$BUILDKITE_PLUGIN_KOBITON_APP_UPLOAD_KOBITON_USERNAME"
+KOB_APIKEY_INPUT="$BUILDKITE_PLUGIN_KOBITON_APP_UPLOAD_KOBITON_API_KEY"
+KOB_APP_ACCESS="$BUILDKITE_PLUGIN_KOBITON_APP_UPLOAD_KOBITON_APP_ACCESS"
+
+BASICAUTH=$(echo -n $KOB_USERNAME_INPUT:$KOB_APIKEY_INPUT | base64)
+
+printf "\nUsing Auth: $BASICAUTH\n"
+
+if [ -z "$APP_ID_INPUT" ]; then
+    JSON="{\"filename\":\"${APP_NAME_INPUT}.${APP_SUFFIX_INPUT}\"}"
+else
+    JSON="{\"filename\":\"${APP_NAME_INPUT}.${APP_SUFFIX_INPUT}\",\"appId\":\"$APP_ID_INPUT\"}"
+fi
+
+curl --silent -X POST https://api.kobiton.com/v1/apps/uploadUrl \
+    -H "Authorization: Basic $BASICAUTH" \
+    -H 'Content-Type: application/json' \
+    -H 'Accept: application/json' \
+    -d $JSON \
+    -o ".tmp.upload-url-response.json"
+
+cat ".tmp.upload-url-response.json"
+
+UPLOAD_URL=$(cat ".tmp.upload-url-response.json" | ack -o --match '(?<=url\":")([_\%\&=\?\.aA-zZ0-9:/-]*)')
+KAPPPATH=$(cat ".tmp.upload-url-response.json" | ack -o --match '(?<=appPath\":")([_\%\&=\?\.aA-zZ0-9:/-]*)')
+
+printf "\nUploading: ${APP_NAME_INPUT} (${APP_PATH_INPUT})\n"
+echo "URL: ${UPLOAD_URL}"
+
+curl --progress-bar -T "${APP_PATH_INPUT}" \
+    -H "Content-Type: application/octet-stream" \
+    -H "x-amz-tagging: unsaved=true" \
+    -X PUT "${UPLOAD_URL}"
+#--verbose
+
+printf "\nProcessing: ${KAPPPATH}\n"
+
+JSON="{\"filename\":\"${APP_NAME_INPUT}.${APP_SUFFIX_INPUT}\",\"appPath\":\"${KAPPPATH}\"}"
+curl -X POST https://api.kobiton.com/v1/apps \
+    -H "Authorization: Basic $BASICAUTH" \
+    -H 'Content-Type: application/json' \
+    -d $JSON \
+    -o ".tmp.upload-app-response.json"
+
+printf "\nResponse:"
+cat ".tmp.upload-app-response.json"
+printf "\n"
+
+APP_VERSION_ID=$(cat ".tmp.upload-app-response.json" | ack -o --match '(?<=versionId\":)([_\%\&=\?\.aA-zZ0-9:/-]*)')
+
+# Kobiton need some times to update the appId for new appVersion
+sleep 30
+
+curl -X GET https://api.kobiton.com/v1/app/versions/$APP_VERSION_ID \
+    -H "Authorization: Basic $BASICAUTH" \
+    -H "Accept: application/json" \
+    -o ".tmp.get-appversion-response.json"
+
+APP_ID=$(cat ".tmp.get-appversion-response.json" | ack -o --match '(?<=appId\":)([_\%\&=\?\.aA-zZ0-9:/-]*)')
+
+curl -X PUT https://api.kobiton.com/v1/apps/$APP_ID/$KOB_APP_ACCESS \
+    -H "Authorization: Basic $BASICAUTH"
+
+printf "\n=====================================================================================\n"
+printf "Uploaded app to kobiton repo with appId: ${APP_ID} and versionId: ${APP_VERSION_ID}\n"
+printf "Done."
+printf "\n=====================================================================================\n"
